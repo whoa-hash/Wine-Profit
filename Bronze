@@ -1,0 +1,44 @@
+
+# spark.sql("DROP TABLE IF EXISTS wine_sales_catalog.bronze.raw_csv_data")
+# 1. Define Paths
+# Use a Unity Catalog Volume path or an S3 path
+source_path = f'{bucket}/raw/data/'
+checkpoint_path = f"{bucket}/checkpoints/bronze_ingestion/"
+target_table = "wine_sales_catalog.bronze.raw_csv_data"
+
+# 2. Configure Auto Loader
+df = (spark.readStream
+    .format("cloudFiles")
+    .option("cloudFiles.format", "csv")
+    .option("header", "true")            # Specific to CSV
+    .option("quote",'"')
+    .option('escape', '"')#there's a column value that includes a double quote and a comma ,"MORGON ""COTE DU PY"" BEAUJOLAIS, DOMAINE PIRON - 750ML",
+    .option('sep',',')
+    .option("cloudFiles.inferColumnTypes", "true") # Let Databricks guess types
+    .option("cloudFiles.schemaLocation", f"{checkpoint_path}/schema")
+    .option("pathGlobFilter", "*.csv")
+    .load(source_path))
+
+# switch spaces to underscores
+df = df.toDF(*[c.replace(' ', '_') for c in df.columns])
+
+# 3. Trigger "Available Now" (The cost-saving part)
+query = (df.writeStream
+    .format("delta")
+    .outputMode("append")
+    .option("checkpointLocation", f"{checkpoint_path}/data")
+    .trigger(availableNow=True)  # Processes all new data, then stops
+    .toTable(target_table))
+
+query.awaitTermination()
+
+# check to make sure data loaded
+display(spark.sql(f"SELECT count(1) FROM {target_table}"))
+# check to make sure primary key is there for all columns
+display(spark.sql(f"select count(distinct item_code) from {target_table}"))
+display(spark.sql(f"select * from {target_table}"))
+df.printSchema()
+# # there is no id column so let's just add a unique identifier in a different bronze table
+# # if this is a duplicate then it'll be the same just with a different id number
+# df = df.withColumn("id", monotonically_increasing_id())
+# df.write.mode('append').saveAsTable("wine_sales_catalog.bronze.raw_csv_data_with_id")
