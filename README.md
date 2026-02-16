@@ -8,7 +8,7 @@ From a CSV file hosted in AWS:
 Folders: 
 <img width="342" height="562" alt="image" src="https://github.com/user-attachments/assets/a2e2669b-2ea1-49a8-802d-1e7f78ef16e7" />
 
-To a Gold table:
+To a Gold table showing profit in descending order:
 <img width="923" height="591" alt="image" src="https://github.com/user-attachments/assets/05e2db16-cf08-40ec-9e36-56d80f52dabc" />
 
 
