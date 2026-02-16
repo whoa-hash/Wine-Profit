@@ -6,6 +6,7 @@ Pipeline using medallion architecture, with data from csv modeled into tables, t
 Data Model:
 
 
+<img width="1208" height="757" alt="image" src="https://github.com/user-attachments/assets/e80c83fe-bca4-4544-9d7a-c8e94f2adb25" />
 
 <img width="578" height="648" alt="image" src="https://github.com/user-attachments/assets/44b50b1b-fc54-4e8f-8a8a-223cb3909d7f" />
 
