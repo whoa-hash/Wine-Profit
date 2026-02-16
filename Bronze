@@ -38,7 +38,4 @@ display(spark.sql(f"SELECT count(1) FROM {target_table}"))
 display(spark.sql(f"select count(distinct item_code) from {target_table}"))
 display(spark.sql(f"select * from {target_table}"))
 df.printSchema()
-# # there is no id column so let's just add a unique identifier in a different bronze table
-# # if this is a duplicate then it'll be the same just with a different id number
-# df = df.withColumn("id", monotonically_increasing_id())
-# df.write.mode('append').saveAsTable("wine_sales_catalog.bronze.raw_csv_data_with_id")
+
