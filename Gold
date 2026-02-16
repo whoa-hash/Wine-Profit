@@ -1,5 +1,5 @@
 
-# aggregate data from sales, item and sensor to see if there is a specific humidity that is good for sales
+# aggregate data from sales, item and sensor to see which items had the largest profits
 
 sales_table = "wine_sales_catalog.silver.sales_table"
 item_table = "wine_sales_catalog.silver.item_table"
