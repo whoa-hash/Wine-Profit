@@ -1,0 +1,178 @@
+%md
+### set variable source table
+source_table = "wine_sales_catalog.bronze.raw_csv_data"
+
+%sql
+-- create date table for year and month from bronze table
+create or replace table wine_sales_catalog.silver.date_table
+CLUSTER BY (YEAR, MONTH)
+AS
+SELECT 
+  monotonically_increasing_id() AS date_id,
+  YEAR,
+  MONTH
+FROM wine_sales_catalog.bronze.raw_csv_data
+WHERE YEAR IS NOT NULL AND MONTH IS NOT NULL AND YEAR > 1900 AND MONTH BETWEEN 1 AND 12
+GROUP BY YEAR, MONTH
+ORDER BY YEAR, MONTH
+# check to make sure date loaded
+display(spark.sql("select * from wine_sales_catalog.silver.date_table order by year, month"))
+# if table exists already, count how many records it already has
+if spark.catalog.tableExists("wine_sales_catalog.silver.item_table"):
+    df = spark.sql("select count(1) from wine_sales_catalog.silver.item_table")
+    print(f"Table already exists with {df.first()[0]} records")
+   
+# create or merge item table from raw with date id
+# if table does not exist, create it
+if not spark.catalog.tableExists("wine_sales_catalog.silver.item_table"):
+    spark.sql(f"""
+    CREATE TABLE wine_sales_catalog.silver.item_table
+    CLUSTER BY (ITEM_CODE)
+    AS
+    SELECT
+      r.ITEM_CODE,
+      r.ITEM_DESCRIPTION,
+      r.ITEM_TYPE,
+      r.Supplier,
+      d.date_id
+    FROM
+      {source_table} r
+    INNER JOIN
+      wine_sales_catalog.silver.date_table d
+    ON
+      r.YEAR = d.YEAR AND r.MONTH = d.MONTH
+    WHERE
+      r.ITEM_CODE IS NOT NULL 
+    """)
+
+spark.sql(f"""
+MERGE INTO wine_sales_catalog.silver.item_table AS target
+USING (
+  SELECT
+    r.ITEM_CODE,
+    r.ITEM_DESCRIPTION,
+    r.ITEM_TYPE,
+    r.Supplier,
+    d.date_id
+  FROM
+    {source_table} r
+  INNER JOIN
+    wine_sales_catalog.silver.date_table d
+  ON
+    r.YEAR = d.YEAR AND r.MONTH = d.MONTH
+  WHERE
+    r.ITEM_CODE IS NOT NULL 
+) AS source
+ON target.ITEM_CODE = source.ITEM_CODE
+WHEN NOT MATCHED THEN
+  INSERT (ITEM_CODE, ITEM_DESCRIPTION, ITEM_TYPE, Supplier, date_id)
+  VALUES (source.ITEM_CODE, source.ITEM_DESCRIPTION, source.ITEM_TYPE, source.Supplier, source.date_id)
+""")
+# check to see if data was loaded to item table
+display(spark.sql("select count(1) from wine_sales_catalog.silver.item_table"))
+# read in item table as df and check schema
+df = spark.sql("select * from wine_sales_catalog.silver.item_table")
+df.printSchema()
+df_source = spark.sql(f"SELECT * FROM {source_table} LIMIT 1")
+print(df_source.columns)
+%md
+## Create Sales Table
+# create sales table or merge new sales data
+if not spark.catalog.tableExists("wine_sales_catalog.silver.sales_table"):
+    spark.sql(f"""
+    CREATE TABLE wine_sales_catalog.silver.sales_table
+    CLUSTER BY (item_code, date_id)
+    AS
+    SELECT
+      monotonically_increasing_id() AS sales_id,
+      r.RETAIL_SALES,
+      r.WAREHOUSE_SALES,
+      d.date_id,
+      i.ITEM_CODE
+    FROM
+      {source_table} r
+    INNER JOIN
+      wine_sales_catalog.silver.date_table d
+    ON
+      r.YEAR = d.YEAR AND r.MONTH = d.MONTH
+    INNER JOIN
+      wine_sales_catalog.silver.item_table i
+    ON
+      r.ITEM_CODE = i.ITEM_CODE AND d.date_id = i.date_id
+    WHERE
+      r.WAREHOUSE_SALES is not null AND r.RETAIL_SALES is not null
+  """)
+else:
+    spark.sql(f"""
+    MERGE INTO wine_sales_catalog.silver.sales_table AS target
+    USING (
+      SELECT
+        monotonically_increasing_id() AS sales_id,
+        r.RETAIL_SALES,
+        r.WAREHOUSE_SALES,
+        d.date_id,
+        i.ITEM_CODE
+      FROM
+        {source_table} r
+      INNER JOIN
+        wine_sales_catalog.silver.date_table d
+      ON
+        r.YEAR = d.YEAR AND r.MONTH = d.MONTH
+      INNER JOIN
+        wine_sales_catalog.silver.item_table i
+      ON
+        r.ITEM_CODE = i.ITEM_CODE AND d.date_id = i.date_id
+      WHERE
+        r.WAREHOUSE_SALES is not null AND r.RETAIL_SALES is not null
+    ) AS source
+    ON target.item_code = source.ITEM_CODE
+    WHEN NOT MATCHED THEN
+      INSERT (sales_id, retail_sales, warehouse_sales, date_id, item_code)
+      VALUES (source.sales_id, source.RETAIL_SALES, source.WAREHOUSE_SALES, source.date_id, source.ITEM_CODE)
+    """)
+%md
+## Count number of sales/see null or 0 sales
+%sql
+select count(1) from wine_sales_catalog.silver.sales_table where RETAIL_SALES is null OR WAREHOUSE_SALES is null
+
+%sql
+select count(1) from wine_sales_catalog.bronze.raw_csv_data where (WAREHOUSE_SALES is null) OR (RETAIL_SALES is null)
+%sql
+select * from wine_sales_catalog.bronze.raw_csv_data where RETAIL_SALES is null
+%sql
+select ITEM_CODE, RETAIL_SALES, WAREHOUSE_SALES from wine_sales_catalog.bronze.raw_csv_data
+minus select item_code, retail_sales, warehouse_sales from wine_sales_catalog.silver.sales_table
+# read in sales table as df and check schema
+df = spark.sql("select * from wine_sales_catalog.silver.sales_table")
+df.printSchema()
+# check to make sure csv parsed correctly 
+spark.sql(f"""
+    SELECT retail_sales,*
+    FROM wine_sales_catalog.silver.sales_table
+    WHERE regexp_like(retail_sales, '^[A-Za-z]+$')
+""").display()
+# display sales table to see if loaded
+display(spark.sql("select count(1) from wine_sales_catalog.silver.sales_table"))
+%md
+## Create sensor humidity table
+# now we are going to generate synthetic sensor data for humidity at the item level
+# we are only adding new readings
+import random
+
+sensor_table = "wine_sales_catalog.silver.sensor_humidity"
+
+if not spark.catalog.tableExists(sensor_table):
+    sales_df = spark.sql("SELECT sales_id, item_code, date_id FROM wine_sales_catalog.silver.sales_table")
+    sales_data = sales_df.collect()
+    synthetic_data = []
+    for idx, row in enumerate(sales_data):
+        # 90% normal humidity (55-65), 10% too humid (70-80)
+        if random.random() < 0.9:
+            value = round(random.uniform(55, 65), 1)
+        else:
+            value = round(random.uniform(70, 80), 1)
+        synthetic_data.append((idx, row.sales_id, row.item_code, row.date_id, "humidity", value))
+    df = spark.createDataFrame(synthetic_data, ["id", "sales_id", "item_code", "date_id", "sensor_description", "sensor_value"])
+    df.write.format("delta").saveAsTable(sensor_table)
+# display some rows from sensor table
+display(spark.sql(f"select * from {sensor_table} limit 5"))
