@@ -1,5 +1,4 @@
 
-# spark.sql("DROP TABLE IF EXISTS wine_sales_catalog.bronze.raw_csv_data")
 # 1. Define Paths
 # Use a Unity Catalog Volume path or an S3 path
 source_path = f'{bucket}/raw/data/'
