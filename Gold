@@ -33,4 +33,3 @@ if not spark.catalog.tableExists("wine_sales_catalog.gold.gold_table"):
 else:
     gold_df.write.mode("overwrite").saveAsTable("wine_sales_catalog.gold.gold_table")
 gold_df.printSchema()
-#
