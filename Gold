@@ -1,0 +1,36 @@
+
+# aggregate data from sales, item and sensor to see if there is a specific humidity that is good for sales
+
+sales_table = "wine_sales_catalog.silver.sales_table"
+item_table = "wine_sales_catalog.silver.item_table"
+sensor_table = "wine_sales_catalog.silver.sensor_humidity"
+date_table = "wine_sales_catalog.silver.date_table"
+
+# create gold table with item description, count of items, and aggregated profit per year
+gold_df = spark.sql(f'''
+    SELECT 
+        d.year,
+        i.ITEM_DESCRIPTION as item,
+        COUNT(i.ITEM_CODE) as months_item_present,
+        round(sum(s.retail_sales + s.warehouse_sales),2) as total_profit
+    FROM {item_table} i
+    RIGHT JOIN {sales_table} s ON s.item_code = i.ITEM_CODE and s.date_id = i.date_id
+    JOIN {date_table} d ON s.date_id = d.date_id
+    JOIN {sensor_table} sens ON sens.item_code = i.ITEM_CODE and sens.date_id = d.date_id
+    GROUP BY d.year, i.ITEM_DESCRIPTION
+    ORDER BY d.year, total_profit DESC
+''')
+gold_df.display((20))
+gold_df.count()
+gold_view = gold_df.createOrReplaceTempView(
+    "gold_view"
+)
+spark.sql("SELECT COUNT(1) FROM gold_view").display()
+#save table in catalog
+
+if not spark.catalog.tableExists("wine_sales_catalog.gold.gold_table"):
+    gold_df.write.saveAsTable("wine_sales_catalog.gold.gold_table")
+else:
+    gold_df.write.mode("overwrite").saveAsTable("wine_sales_catalog.gold.gold_table")
+gold_df.printSchema()
+#
