@@ -4,6 +4,9 @@ Pipeline using medallion architecture, with data from csv modeled into tables, t
 <img width="620" height="306" alt="image" src="https://github.com/user-attachments/assets/71542408-fa99-47ae-9310-bcad7c4637fc" />
 
 Data Model:
+
+
+
 <img width="578" height="648" alt="image" src="https://github.com/user-attachments/assets/44b50b1b-fc54-4e8f-8a8a-223cb3909d7f" />
 
 From a CSV file hosted in AWS:
